@@ -20,9 +20,21 @@
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             transition: transform 0.2s;
         }
-        .image-card:hover { transform: translateY(-5px); }
-        .image-card img { width: 100%; height: 200px; object-fit: cover; }
-        .image-info { padding: 12px; font-size: 0.9rem; }
+        .image-card:hover {
+            transform: translateY(-5px);
+        }
+        .image-card img {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+        }
+        .image-info {
+            padding: 12px;
+            font-size: 0.9rem;
+        }
+        .navbar-text {
+            font-size: 0.9rem;
+        }
     </style>
 </head>
 <body class="bg-light">
@@ -35,7 +47,8 @@
                     Logged in as: <strong>{{ current_user }}</strong>
                 </span>
                 <a href="/" class="btn btn-outline-light btn-sm me-2">Home</a>
-                <button onclick="forceLogout()" class="btn btn-danger btn-sm">Logout</button>
+                
+                <a href="/logout" class="btn btn-danger btn-sm">Logout</a>
             </div>
         </div>
     </nav>
@@ -45,7 +58,9 @@
             <h2>Shared Photos (Secure)</h2>
             <a href="/" class="btn btn-primary">+ Upload New</a>
         </div>
+
         <hr>
+
         <div class="gallery-container">
             {% if images %}
                 {% for img in images %}
@@ -55,6 +70,7 @@
                         <div class="text-truncate"><strong>{{ img.file_name }}</strong></div>
                         <div class="d-flex justify-content-between align-items-center mt-2">
                             <span class="text-muted small">By: {{ img.uploaded_by }}</span>
+                            
                             <form action="/delete-image" method="post" onsubmit="return confirm('Delete this image forever?');">
                                 <input type="hidden" name="file_path" value="{{ img.storage_path }}">
                                 <button type="submit" class="btn btn-sm btn-outline-danger" style="font-size: 0.7rem;">Delete</button>
@@ -65,27 +81,18 @@
                 {% endfor %}
             {% else %}
                 <div class="col-12 text-center py-5">
-                    <div class="alert alert-info">No images found yet.</div>
+                    <div class="alert alert-info">
+                        No images found in the gallery yet.
+                    </div>
                 </div>
             {% endif %}
         </div>
     </div>
 
-    <script>
-        function forceLogout() {
-            // 1. Point to the root '/' with junk credentials to clear the session
-            const logoutUrl = window.location.protocol + "//log:out@" + window.location.host + "/";
-            
-            // 2. Redirect to that URL
-            window.location.href = logoutUrl;
-            
-            // 3. For extra insurance, most browsers need the user to land on a non-auth page
-            // to stop the 'incorrect credentials' prompt from appearing.
-            // After 200ms, ensure we are sitting comfortably on the Home page.
-            setTimeout(() => {
-                window.location.href = "/";
-            }, 200);
-        }
-    </script>
+    <footer class="text-center py-4 text-muted border-top mt-5">
+        <small>&copy; 2026 FastAPI + Supabase Project</small>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

@@ -184,6 +184,20 @@ def check_env():
         "sb_key": "OK" if SUPABASE_KEY else "Missing"
     }
 
+@app.get("/logout")
+async def logout():
+    # Sending a 401 response is the only 'official' way to tell the 
+    # browser to clear Basic Auth credentials.
+    return HTMLResponse(
+        content="""
+        <script>
+            alert('You have been logged out.');
+            window.location.href = '/';
+        </script>
+        """,
+        status_code=401
+    )    
+
 # 5. SERVER RUNNER
 if __name__ == "__main__":
     import uvicorn
