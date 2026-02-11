@@ -1,0 +1,13 @@
+<form action="/upload-image" method="post" enctype="multipart/form-data">
+    <div class="mb-3">
+        <label for="username" class="form-label">Username:</label>
+        <input type="text" name="username" class="form-control" required>
+    </div>
+    
+    <div class="mb-3">
+        <label for="file" class="form-label">Select Image (PNG, JPG):</label>
+        <input type="file" name="file" accept="image/*" class="form-control" required>
+    </div>
+    
+    <button type="submit" class="btn btn-primary">Upload to Gallery</button>
+</form>
