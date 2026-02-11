@@ -2,3 +2,4 @@ fastapi[standard]
 jinja2
 uvicorn
 pydantic
+psycopg2-binary
