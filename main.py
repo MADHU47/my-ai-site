@@ -72,7 +72,7 @@ async def view_users(request: Request):
     # Send the list of users to the HTML template
     return templates.TemplateResponse("users.html", {"request": request, "user_list": all_users})
 
-    @app.get("/check-env")
+@app.get("/check-env")
 def check_env():
     # This checks if the variable exists without revealing the full password
     if os.environ.get("DATABASE_URL"):
