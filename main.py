@@ -20,7 +20,9 @@ DB_URL = os.environ.get("DATABASE_URL")
 def get_db_connection():
     if DB_URL is None:
         raise ValueError("DATABASE_URL environment variable is not set!")
-    conn = psycopg2.connect(DB_URL)
+    
+    # We add 'sslmode=require' to ensure the cloud connection is secure and accepted
+    conn = psycopg2.connect(DB_URL, sslmode='require')
     return conn
 
 def init_db():
