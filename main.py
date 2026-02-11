@@ -49,3 +49,18 @@ if __name__ == "__main__":
     # Important: Use 0.0.0.0 and dynamic port for Render
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
+
+    # ... (rest of your existing code)
+
+@app.get("/view-users", response_class=HTMLResponse)
+async def view_users(request: Request):
+    conn = sqlite3.connect('my_website.db')
+    cursor = conn.cursor()
+    # Fetch all users from the table
+    cursor.execute("SELECT id, username, email FROM users")
+    all_users = cursor.fetchall()
+    conn.close()
+    
+    # Send the list of users to the HTML template
+    return templates.TemplateResponse("users.html", {"request": request, "user_list": all_users})
