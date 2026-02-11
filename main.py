@@ -11,10 +11,15 @@ app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
 # Replace this with your actual URI from Supabase
-DB_URL = "your_supabase_connection_uri_here"
+#DB_URL = "postgresql://postgres:[YOUR-PASSWORD]@db.wizruqwyffvdqjxbxkgr.supabase.co:5432/postgres"
+
+# This line says: "Look for a variable named DATABASE_URL. 
+# If you don't find it, use None."
+DB_URL = os.environ.get("DATABASE_URL")
 
 def get_db_connection():
-    # This connects Python to the cloud PostgreSQL database
+    if DB_URL is None:
+        raise ValueError("DATABASE_URL environment variable is not set!")
     conn = psycopg2.connect(DB_URL)
     return conn
 
