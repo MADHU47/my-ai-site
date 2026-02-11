@@ -12,10 +12,12 @@ from supabase import create_client, Client
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
+# Environment Variables
 DB_URL = os.environ.get("DATABASE_URL")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
+# Initialize Supabase Client
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 security = HTTPBasic()
 
@@ -26,7 +28,6 @@ class UserData(BaseModel):
 
 # --- 3. DATABASE FUNCTIONS ---
 def get_db_connection():
-    # Adding a check to ensure DB_URL exists before connecting
     if not DB_URL:
         raise HTTPException(status_code=500, detail="Database URL not configured")
     return psycopg2.connect(DB_URL, sslmode='require')
@@ -84,6 +85,7 @@ async def view_gallery(request: Request, username: str = Depends(authenticate_us
     image_list = []
     for row in images:
         try:
+            # Generate 15-min Signed URL
             response = supabase.storage.from_("new gallery").create_signed_url(row[1], 900)
             image_list.append({
                 "file_name": row[0],
@@ -92,7 +94,7 @@ async def view_gallery(request: Request, username: str = Depends(authenticate_us
                 "storage_path": row[1]
             })
         except Exception as e:
-            print(f"Error signing URL: {e}")
+            print(f"Signing error: {e}")
             continue
             
     return templates.TemplateResponse("gallery.html", {"request": request, "images": image_list, "current_user": username})
@@ -103,36 +105,41 @@ async def upload_image(file: UploadFile = File(...), username: str = Depends(aut
         file_content = await file.read()
         file_path = f"{username}/{file.filename}"
         
-        # Upload to Supabase
+        # 1. Upload to Supabase with "upsert": True to handle duplicates
         supabase.storage.from_("new gallery").upload(
             path=file_path, 
             file=file_content, 
-            file_options={"content-type": file.content_type}
+            file_options={
+                "content-type": file.content_type,
+                "upsert": "true" 
+            }
         )
         
-        # Use a placeholder public URL since we use Signed URLs for viewing
-        placeholder_url = f"{SUPABASE_URL}/storage/v1/object/public/new%20gallery/{file_path}"
-        
-        # Save to Database
+        # 2. Update Database (only if record doesn't exist)
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO image_metadata (file_name, storage_path, public_url, uploaded_by) VALUES (%s, %s, %s, %s)",
-            (file.filename, file_path, placeholder_url, username)
-        )
+        cur.execute("SELECT id FROM image_metadata WHERE storage_path = %s", (file_path,))
+        if not cur.fetchone():
+            placeholder_url = f"{SUPABASE_URL}/storage/v1/object/public/new%20gallery/{file_path}"
+            cur.execute(
+                "INSERT INTO image_metadata (file_name, storage_path, public_url, uploaded_by) VALUES (%s, %s, %s, %s)",
+                (file.filename, file_path, placeholder_url, username)
+            )
+        
         conn.commit()
         cur.close()
         conn.close()
         
         return RedirectResponse(url="/view-gallery", status_code=status.HTTP_303_SEE_OTHER)
     except Exception as e:
-        print(f"Upload Error: {e}")
-        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Upload error: {str(e)}")
 
 @app.post("/delete-image")
 async def delete_image(file_path: str = Form(...), username: str = Depends(authenticate_user)):
     try:
+        # Delete from Supabase
         supabase.storage.from_("new gallery").remove([file_path])
+        # Delete from DB
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("DELETE FROM image_metadata WHERE storage_path = %s", (file_path,))
@@ -145,9 +152,9 @@ async def delete_image(file_path: str = Form(...), username: str = Depends(authe
 
 @app.get("/logout")
 async def logout():
-    # Forced 401 to clear Basic Auth
+    # Forced 401 to clear Basic Auth cache
     return HTMLResponse(
-        content="<script>alert('Logging out...'); window.location.href='/';</script>",
+        content="<script>alert('Logged out.'); window.location.href='/';</script>",
         status_code=401
     )
 
