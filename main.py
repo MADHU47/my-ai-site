@@ -19,7 +19,6 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
 # Initialize Supabase Client for Storage
-# Ensure these variables are set in Render!
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 security = HTTPBasic()
@@ -65,7 +64,6 @@ def init_db():
 init_db()
 
 def authenticate_user(credentials: HTTPBasicCredentials = Depends(security)):
-    # Fetching credentials from Render Env Vars
     u1, p1 = os.environ.get("ADMIN_USERNAME"), os.environ.get("ADMIN_PASSWORD")
     u2, p2 = os.environ.get("USER2_USERNAME"), os.environ.get("USER2_PASSWORD")
 
@@ -97,15 +95,31 @@ async def home(request: Request):
 async def view_gallery(request: Request, username: str = Depends(authenticate_user)):
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT file_name, public_url, uploaded_by FROM image_metadata ORDER BY created_at DESC")
+    
+    # We fetch storage_path to generate Signed URLs
+    cur.execute("SELECT file_name, storage_path, uploaded_by FROM image_metadata ORDER BY created_at DESC")
     images = cur.fetchall()
+    
     cur.close()
     conn.close()
     
-    image_list = [
-        {"file_name": row[0], "public_url": row[1], "uploaded_by": row[2]} 
-        for row in images
-    ]
+    image_list = []
+    for row in images:
+        f_name, s_path, u_by = row
+        try:
+            # Generate a signed URL valid for 15 minutes (900 seconds)
+            # This is used because the "new gallery" bucket is now PRIVATE
+            response = supabase.storage.from_("new gallery").create_signed_url(s_path, 900)
+            
+            image_list.append({
+                "file_name": f_name,
+                "signed_url": response['signedURL'],
+                "uploaded_by": u_by
+            })
+        except Exception as e:
+            print(f"Error generating signed URL for {s_path}: {e}")
+            continue
+            
     return templates.TemplateResponse("gallery.html", {
         "request": request, 
         "images": image_list, 
@@ -119,7 +133,6 @@ async def upload_image(
 ):
     # 1. Read file content
     file_content = await file.read()
-    # Path inside the bucket (organized by user)
     file_path = f"{username}/{file.filename}"
 
     # 2. Upload to Supabase Storage Bucket: "new gallery"
@@ -129,7 +142,7 @@ async def upload_image(
         file_options={"content-type": file.content_type}
     )
 
-    # 3. Get Public URL from "new gallery"
+    # 3. Get Public URL (Stored for reference, but /view-gallery now uses Signed URLs)
     public_url = supabase.storage.from_("new gallery").get_public_url(file_path)
 
     # 4. Save metadata to Postgres
