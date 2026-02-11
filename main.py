@@ -1,3 +1,5 @@
+import psycopg2 # Use this instead of sqlite3
+import os
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -8,41 +10,41 @@ import os
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
-# --- ADD THIS NEW FUNCTION HERE ---
+# Replace this with your actual URI from Supabase
+DB_URL = "your_supabase_connection_uri_here"
+
+def get_db_connection():
+    # This connects Python to the cloud PostgreSQL database
+    conn = psycopg2.connect(DB_URL)
+    return conn
+
 def init_db():
-    conn = sqlite3.connect('my_website.db')
+    conn = get_db_connection()
     cursor = conn.cursor()
-    # This creates the table if it's missing on the server
+    # PostgreSQL uses slightly different syntax (SERIAL instead of AUTOINCREMENT)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             username TEXT NOT NULL,
             email TEXT NOT NULL
         )
     ''')
     conn.commit()
+    cursor.close()
     conn.close()
 
-# Run the initialization
 init_db()
-# ----------------------------------
-
-class UserData(BaseModel):
-    username: str
-    email: str
-
-@app.get("/", response_class=HTMLResponse)
-async def serve_home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
 
 @app.post("/register")
 async def register_user(data: UserData):
-    conn = sqlite3.connect('my_website.db')
+    conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO users (username, email) VALUES (?, ?)", (data.username, data.email))
+    # PostgreSQL uses %s as placeholders instead of ?
+    cursor.execute("INSERT INTO users (username, email) VALUES (%s, %s)", (data.username, data.email))
     conn.commit()
+    cursor.close()
     conn.close()
-    return {"status": f"Success! {data.username} saved to the database."}
+    return {"status": "Saved to Cloud Database!"}
 
 if __name__ == "__main__":
     import uvicorn
