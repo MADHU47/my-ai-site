@@ -1,7 +1,7 @@
-fastapi[standard]
-jinja2
+fastapi
 uvicorn
-pydantic
 psycopg2-binary
-supabase
 python-multipart
+supabase
+jinja2
+pydantic
