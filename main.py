@@ -2,6 +2,7 @@ import os
 import psycopg2
 import secrets
 import io
+import string
 from fastapi import FastAPI, Request, Depends, HTTPException, status, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
@@ -32,7 +33,7 @@ def get_db_connection():
 def init_db():
     conn = get_db_connection()
     cur = conn.cursor()
-    # Updated Users Table for Moderated Access
+    # Users Table
     cur.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
@@ -42,6 +43,7 @@ def init_db():
             status TEXT DEFAULT 'pending'
         )
     ''')
+    # Image Metadata Table
     cur.execute('''
         CREATE TABLE IF NOT EXISTS image_metadata (
             id SERIAL PRIMARY KEY,
@@ -50,6 +52,14 @@ def init_db():
             storage_path TEXT NOT NULL,
             public_url TEXT NOT NULL,
             uploaded_by TEXT NOT NULL
+        )
+    ''')
+    # NEW: Invite Tokens Table
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS invite_tokens (
+            id SERIAL PRIMARY KEY,
+            token TEXT UNIQUE NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         )
     ''')
     conn.commit()
@@ -91,22 +101,45 @@ async def home(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 @app.get("/signup", response_class=HTMLResponse)
-async def signup_page(request: Request):
-    return templates.TemplateResponse("signup.html", {"request": request})
+async def signup_page(request: Request, token: str = ""):
+    # Captures 'token' from URL for auto-filling the form
+    return templates.TemplateResponse("signup.html", {"request": request, "token": token})
 
 @app.post("/submit-signup")
-async def submit_signup(username: str = Form(...), email: str = Form(...), password: str = Form(...)):
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("INSERT INTO users (username, email, password, status) VALUES (%s, %s, %s, 'pending')", 
-                    (username, email, password))
-        conn.commit()
+async def submit_signup(
+    username: str = Form(...), 
+    email: str = Form(...), 
+    password: str = Form(...),
+    invite_token: str = Form(...)
+):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # 1. Verify the Invite Token exists
+    cur.execute("SELECT id FROM invite_tokens WHERE token = %s", (invite_token,))
+    token_record = cur.fetchone()
+    
+    if not token_record:
         cur.close()
         conn.close()
-        return HTMLResponse("<h2>Request Submitted!</h2><p>Wait for admin approval.</p><a href='/'>Home</a>")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid or expired invite token.")
+
+    try:
+        # 2. Insert user with 'active' status immediately
+        cur.execute(
+            "INSERT INTO users (username, email, password, status) VALUES (%s, %s, %s, 'active')",
+            (username, email, password)
+        )
+        # 3. Delete the token so it can't be used again
+        cur.execute("DELETE FROM invite_tokens WHERE id = %s", (token_record[0],))
+        conn.commit()
+        return HTMLResponse("<h2>Signup Successful!</h2><p>Your account is now active. You may now enter the gallery.</p><a href='/view-gallery'>Go to Gallery</a>")
     except Exception:
+        conn.rollback()
         raise HTTPException(status_code=400, detail="Username already exists.")
+    finally:
+        cur.close()
+        conn.close()
 
 # --- 5. ADMIN DASHBOARD ---
 
@@ -117,21 +150,33 @@ async def admin_dashboard(request: Request, current_user: str = Depends(authenti
     
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT id, username, email, status FROM users WHERE status = 'pending'")
-    pending = cur.fetchall()
+    # Fetch all unused tokens
+    cur.execute("SELECT token, created_at FROM invite_tokens ORDER BY created_at DESC")
+    tokens = cur.fetchall()
     cur.close()
     conn.close()
-    return templates.TemplateResponse("admin.html", {"request": request, "users": pending})
+    
+    # Pass base_url to template to generate Magic Links
+    return templates.TemplateResponse("admin.html", {
+        "request": request, 
+        "tokens": tokens, 
+        "base_url": str(request.base_url)
+    })
 
-@app.post("/admin/approve")
-async def approve_user(user_id: int = Form(...), current_user: str = Depends(authenticate_user)):
-    if current_user == ADMIN_USER:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("UPDATE users SET status = 'active' WHERE id = %s", (user_id,))
-        conn.commit()
-        cur.close()
-        conn.close()
+@app.post("/admin/generate-token")
+async def generate_token(current_user: str = Depends(authenticate_user)):
+    if current_user != ADMIN_USER:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    
+    # Generate a random 8-character alphanumeric token
+    new_token = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
+    
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO invite_tokens (token) VALUES (%s)", (new_token,))
+    conn.commit()
+    cur.close()
+    conn.close()
     return RedirectResponse(url="/admin/dashboard", status_code=303)
 
 # --- 6. GALLERY & MEDIA ROUTES ---
