@@ -1,8 +1,9 @@
 import os
 import psycopg2
 import secrets
+import io
 from fastapi import FastAPI, Request, Depends, HTTPException, status, UploadFile, File, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
@@ -99,23 +100,34 @@ async def view_gallery(request: Request, username: str = Depends(authenticate_us
             
     return templates.TemplateResponse("gallery.html", {"request": request, "images": image_list, "current_user": username})
 
+@app.get("/download-image")
+async def download_image(storage_path: str, username: str = Depends(authenticate_user)):
+    try:
+        # Fetch file from private bucket
+        file_data = supabase.storage.from_("new gallery").download(storage_path)
+        filename = storage_path.split("/")[-1]
+        
+        # Stream the file to browser as an attachment
+        return StreamingResponse(
+            io.BytesIO(file_data),
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Download error: {str(e)}")
+
 @app.post("/upload-image")
 async def upload_image(file: UploadFile = File(...), username: str = Depends(authenticate_user)):
     try:
         file_content = await file.read()
         file_path = f"{username}/{file.filename}"
         
-        # 1. Upload to Supabase with "upsert": True to handle duplicates
         supabase.storage.from_("new gallery").upload(
             path=file_path, 
             file=file_content, 
-            file_options={
-                "content-type": file.content_type,
-                "upsert": "true" 
-            }
+            file_options={"content-type": file.content_type, "upsert": "true"}
         )
         
-        # 2. Update Database (only if record doesn't exist)
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("SELECT id FROM image_metadata WHERE storage_path = %s", (file_path,))
@@ -129,7 +141,6 @@ async def upload_image(file: UploadFile = File(...), username: str = Depends(aut
         conn.commit()
         cur.close()
         conn.close()
-        
         return RedirectResponse(url="/view-gallery", status_code=status.HTTP_303_SEE_OTHER)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Upload error: {str(e)}")
@@ -137,9 +148,7 @@ async def upload_image(file: UploadFile = File(...), username: str = Depends(aut
 @app.post("/delete-image")
 async def delete_image(file_path: str = Form(...), username: str = Depends(authenticate_user)):
     try:
-        # Delete from Supabase
         supabase.storage.from_("new gallery").remove([file_path])
-        # Delete from DB
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("DELETE FROM image_metadata WHERE storage_path = %s", (file_path,))
@@ -152,21 +161,10 @@ async def delete_image(file_path: str = Form(...), username: str = Depends(authe
 
 @app.get("/logout")
 async def logout():
-    # Forced 401 to clear Basic Auth cache
     return HTMLResponse(
         content="<script>alert('Logged out.'); window.location.href='/';</script>",
         status_code=401
     )
-
-@app.post("/register")
-async def register_user(data: UserData):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("INSERT INTO users (username, email) VALUES (%s, %s)", (data.username, data.email))
-    conn.commit()
-    cur.close()
-    conn.close()
-    return {"status": "User Registered"}
 
 if __name__ == "__main__":
     import uvicorn
