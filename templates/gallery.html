@@ -47,7 +47,7 @@
                             <a href="/download-image?storage_path={{ img.storage_path }}" class="btn btn-sm btn-outline-success">
                                 <i class="bi bi-download"></i>
                             </a>
-                            {% if current_user == img.uploaded_by or current_user == "ADMIN_USERNAME" %}
+                            {% if current_user == img.uploaded_by or current_user == "muddhu" %}
                             <form action="/delete-image" method="post" onsubmit="return confirm('Delete permanently?');" class="d-inline">
                                 <input type="hidden" name="file_path" value="{{ img.storage_path }}">
                                 <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
