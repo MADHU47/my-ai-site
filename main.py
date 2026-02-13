@@ -63,6 +63,38 @@ def authenticate_user(credentials: HTTPBasicCredentials = Depends(security)):
         return credentials.username
     raise HTTPException(status_code=401, detail="Unauthorized", headers={"WWW-Authenticate": "Basic"})
 
+# --- NCERT LIBRARY ROUTE ---
+@app.get("/library", response_class=HTMLResponse)
+async def view_library(request: Request, username: str = Depends(authenticate_user)):
+    # Manual list of books you've uploaded
+    books_metadata = [
+        {
+            "title": "Hindi: Rimjhim (Class 4)", 
+            "path": "Class 4/desa105.pdf",
+            "subject": "Hindi"
+        }
+    ]
+    
+    library_items = []
+    for book in books_metadata:
+        try:
+            # Generate a temporary signed URL valid for 1 hour (3600 seconds)
+            # This follows the "As Is" requirement of the NCERT license
+            res = supabase.storage.from_("ncert-books").create_signed_url(book['path'], 3600)
+            library_items.append({
+                "title": book['title'],
+                "subject": book['subject'],
+                "url": res['signedURL']
+            })
+        except Exception as e:
+            print(f"Error fetching {book['path']}: {e}")
+            
+    return templates.TemplateResponse("library.html", {
+        "request": request, 
+        "books": library_items,
+        "current_user": username
+    })
+
 # --- PUBLIC ROUTES ---
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):

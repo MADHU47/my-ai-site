@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>The Vault | NCERT Library</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+</head>
+<body style="background-color: #fdfaf6;">
+
+    <nav class="navbar navbar-dark bg-dark p-3 shadow-sm">
+        <div class="container">
+            <span class="navbar-brand fw-bold">Library Access: {{ current_user }}</span>
+            <a href="/view-gallery" class="btn btn-outline-light btn-sm">Back to Memories</a>
+        </div>
+    </nav>
+
+    <div class="container mt-5">
+        <div class="text-center mb-5">
+            <h1 class="display-5 fw-bold text-dark">NCERT Digital Library</h1>
+            <p class="lead text-muted">Educational resources hosted for private, non-commercial use.</p>
+        </div>
+        
+        <div class="row row-cols-1 row-cols-md-3 g-4 justify-content-center">
+            {% for book in books %}
+            <div class="col">
+                <div class="card h-100 border-0 shadow-sm text-center p-4">
+                    <i class="bi bi-file-earmark-pdf text-danger" style="font-size: 4rem;"></i>
+                    <div class="card-body">
+                        <h5 class="card-title fw-bold">{{ book.title }}</h5>
+                        <p class="badge bg-info text-dark">{{ book.subject }}</p>
+                        <br>
+                        <a href="{{ book.url }}" target="_blank" class="btn btn-primary w-100 mt-3">
+                            Read Now
+                        </a>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="mt-5 p-4 bg-white border-start border-4 border-primary rounded shadow-sm">
+            <h6 class="fw-bold"><i class="bi bi-shield-check me-2"></i>Legal Notice & Attribution</h6>
+            <p class="small text-muted mb-2">
+                This content is the property of the <strong>National Council of Educational Research and Training (NCERT)</strong>. 
+                Hosting is provided strictly under the <strong>CC BY-NC-ND</strong> license.
+            </p>
+            <ul class="small text-muted">
+                <li><strong>Attribution:</strong> NCERT is the corporate author and sole owner.</li>
+                <li><strong>Non-Commercial:</strong> Access is provided free of charge; no sale or hire is permitted.</li>
+                <li><strong>No Derivatives:</strong> Content is distributed in its "as is" form without alteration.</li>
+            </ul>
+            <a href="https://ncert.nic.in/pdf/announcement/E-Content_License.pdf" target="_blank" class="text-decoration-none small">
+                View Official NCERT E-Content License
+            </a>
+        </div>
+    </div>
+
+</body>
+</html>
