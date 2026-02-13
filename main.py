@@ -180,6 +180,49 @@ async def upload_image(file: UploadFile = File(...), username: str = Depends(aut
 async def logout():
     return HTMLResponse("<script>alert('Logged out'); window.location.href='/';</script>", status_code=401)
 
+# --- 6. ADDITIONAL MEDIA ACTIONS ---
+
+@app.get("/download-image")
+async def download_image(storage_path: str, username: str = Depends(authenticate_user)):
+    """Fetches the file from Supabase and streams it to the user's browser."""
+    try:
+        # 1. Download the raw bytes from Supabase
+        file_data = supabase.storage.from_("new gallery").download(storage_path)
+        
+        # 2. Extract the original filename from the path
+        filename = storage_path.split("/")[-1]
+        
+        # 3. Stream it back so the browser treats it as a download
+        return StreamingResponse(
+            io.BytesIO(file_data),
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except Exception as e:
+        print(f"DOWNLOAD ERROR: {e}")
+        raise HTTPException(status_code=500, detail="Could not download file.")
+
+@app.post("/delete-image")
+async def delete_image(file_path: str = Form(...), username: str = Depends(authenticate_user)):
+    """Removes the image from both Supabase Storage and PostgreSQL Metadata."""
+    try:
+        # 1. Remove from Supabase Storage
+        supabase.storage.from_("new gallery").remove([file_path])
+        
+        # 2. Remove from Database
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM image_metadata WHERE storage_path = %s", (file_path,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        print(f"DEBUG: {username} deleted {file_path}")
+        return RedirectResponse(url="/view-gallery", status_code=303)
+    except Exception as e:
+        print(f"DELETE ERROR: {e}")
+        raise HTTPException(status_code=500, detail="Could not delete file.")
+        
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))

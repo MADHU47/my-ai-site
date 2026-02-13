@@ -2,61 +2,90 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Private Gallery</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <style>
+        .img-container { position: relative; cursor: pointer; border-radius: 12px; overflow: hidden; background: #eee; }
+        .img-container img { transition: transform 0.3s ease; height: 250px; object-fit: cover; width: 100%; }
+        .img-container:hover img { transform: scale(1.05); }
+        /* Modal Lightbox Style */
+        #lightboxModal img { max-height: 85vh; object-fit: contain; }
+    </style>
 </head>
 <body class="bg-light">
+
     <nav class="navbar navbar-dark bg-dark p-3 shadow-sm">
         <div class="container">
-            <span class="navbar-brand">User Account: <strong>{{ current_user }}</strong></span>
-            <a href="/logout" class="btn btn-outline-danger">Logout</a>
+            <span class="navbar-brand fw-bold">User: {{ current_user }}</span>
+            <a href="/logout" class="btn btn-outline-danger btn-sm">Logout</a>
         </div>
     </nav>
 
     <div class="container mt-5">
-        <div class="card p-4 shadow-sm border-0">
-            <h4 class="fw-bold text-secondary mb-3">Add to Gallery</h4>
-            
-            <form id="debugUploadForm" action="/upload-image" method="post" enctype="multipart/form-data">
-                <div class="mb-3">
-                    <label class="form-label small">Select Image File:</label>
-                    <input type="file" name="file" id="fileInput" class="form-control" required>
+        <div class="card p-4 shadow-sm border-0 mb-5">
+            <h5 class="fw-bold text-secondary mb-3">Upload New Media</h5>
+            <form action="/upload-image" method="post" enctype="multipart/form-data">
+                <div class="input-group">
+                    <input type="file" name="file" class="form-control" required>
+                    <button class="btn btn-primary px-4" type="submit">Upload</button>
                 </div>
-                <button type="submit" class="btn btn-primary w-100 fw-bold">Execute Upload</button>
             </form>
         </div>
 
-        <div class="row mt-5">
-            {% if not images %}
-                <div class="text-center text-muted py-5">
-                    <i class="bi bi-inbox fs-1"></i>
-                    <p>No images found in the vault.</p>
-                </div>
-            {% endif %}
-
+        <div class="row g-4">
             {% for img in images %}
-            <div class="col-md-3 mb-4">
-                <div class="card h-100 shadow-sm border-0">
-                    <img src="{{ img.signed_url }}" class="card-img-top" style="height:200px; object-fit:cover; border-radius: 8px 8px 0 0;">
-                    <div class="p-2 text-center small text-muted text-truncate">{{ img.file_name }}</div>
+            <div class="col-md-4 col-lg-3">
+                <div class="card h-100 border-0 shadow-sm">
+                    <div class="img-container" onclick="expandImage('{{ img.signed_url }}', '{{ img.file_name }}')">
+                        <img src="{{ img.signed_url }}" alt="Gallery Image">
+                    </div>
+                    <div class="card-body p-2 d-flex justify-content-between align-items-center">
+                        <span class="small text-muted text-truncate me-2">{{ img.file_name }}</span>
+                        <div class="btn-group">
+                            <a href="/download-image?storage_path={{ img.storage_path }}" class="btn btn-sm btn-outline-success">
+                                <i class="bi bi-download"></i>
+                            </a>
+                            {% if current_user == img.uploaded_by or current_user == "ADMIN_USERNAME" %}
+                            <form action="/delete-image" method="post" onsubmit="return confirm('Delete permanently?');" class="d-inline">
+                                <input type="hidden" name="file_path" value="{{ img.storage_path }}">
+                                <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </div>
                 </div>
             </div>
             {% endfor %}
         </div>
     </div>
 
+    <div class="modal fade" id="lightboxModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-xl">
+            <div class="modal-content bg-transparent border-0">
+                <div class="modal-header border-0 p-0">
+                    <button type="button" class="btn-close btn-close-white ms-auto p-3" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-0 text-center">
+                    <img src="" id="lightboxImg" class="img-fluid rounded shadow-lg">
+                    <p id="lightboxCaption" class="text-white mt-3 fw-bold"></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Debugging Alert System
-        document.getElementById('debugUploadForm').onsubmit = function() {
-            const fileCheck = document.getElementById('fileInput').files[0];
-            if (!fileCheck) {
-                alert("CLIENT ERROR: No file selected!");
-                return false;
-            }
-            console.log("CLIENT DEBUG: Attempting to send " + fileCheck.name);
-            return true;
-        };
+        const modal = new bootstrap.Modal(document.getElementById('lightboxModal'));
+        const lightboxImg = document.getElementById('lightboxImg');
+        const lightboxCaption = document.getElementById('lightboxCaption');
+
+        function expandImage(url, name) {
+            lightboxImg.src = url;
+            lightboxCaption.innerText = name;
+            modal.show();
+        }
     </script>
 </body>
 </html>
