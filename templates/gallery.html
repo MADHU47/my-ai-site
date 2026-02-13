@@ -19,6 +19,10 @@
 <nav class="navbar navbar-dark bg-dark p-3 shadow-sm">
     <div class="container">
         <span class="navbar-brand fw-bold">User: {{ current_user }}</span>
+        <div id="weather-widget" class="text-light small ms-3 d-none">
+    <img id="weather-icon" src="" alt="weather" style="width: 30px;">
+    <span id="weather-temp"></span>°C in <span id="weather-city"></span>
+</div>
         <div class="d-flex gap-2">
             {% if current_user == "muddhu" %}
             <a href="/admin/dashboard" class="btn btn-warning btn-sm">
@@ -95,5 +99,32 @@
             modal.show();
         }
     </script>
+    <script>
+    function fetchWeather() {
+        if ("geolocation" in navigator) {
+            navigator.geolocation.getCurrentPosition(async (position) => {
+                const lat = position.coords.latitude;
+                const lon = position.coords.longitude;
+                
+                try {
+                    const response = await fetch(`/api/weather?lat=${lat}&lon=${lon}`);
+                    const data = await response.json();
+                    
+                    if (!data.error) {
+                        document.getElementById('weather-widget').classList.remove('d-none');
+                        document.getElementById('weather-temp').innerText = data.temp;
+                        document.getElementById('weather-city').innerText = data.city;
+                        document.getElementById('weather-icon').src = `https://openweathermap.org/img/wn/${data.icon}.png`;
+                        document.getElementById('weather-icon').title = data.desc;
+                    }
+                } catch (err) {
+                    console.error("Weather fetch failed", err);
+                }
+            });
+        }
+    }
+    // Run it when the page loads
+    window.onload = fetchWeather;
+</script>
 </body>
 </html>

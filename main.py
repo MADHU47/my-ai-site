@@ -3,6 +3,7 @@ import psycopg2
 import secrets
 import io
 import string
+import httpx # You may need to run 'pip install httpx'
 from fastapi import FastAPI, Request, Depends, HTTPException, status, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
@@ -173,6 +174,31 @@ async def delete_image(file_path: str = Form(...), username: str = Depends(authe
 @app.get("/logout")
 async def logout():
     return HTMLResponse("<script>alert('Logged out'); window.location.href='/';</script>", status_code=401)
+
+
+
+@app.get("/api/weather")
+async def get_weather(lat: float, lon: float):
+    api_key = os.environ.get("OPENWEATHER_API_KEY")
+    if not api_key:
+        return {"error": "API Key not configured"}
+    
+    # We use units=metric for Celsius. Use units=imperial for Fahrenheit.
+    url = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&units=metric&appid={api_key}"
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url)
+        if response.status_code != 200:
+            return {"error": "Could not fetch weather"}
+        data = response.json()
+        
+        # We only return what we need to keep it clean
+        return {
+            "temp": round(data["main"]["temp"]),
+            "city": data["name"],
+            "icon": data["weather"][0]["icon"],
+            "desc": data["weather"][0]["description"]
+        }
 
 if __name__ == "__main__":
     import uvicorn
