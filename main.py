@@ -69,9 +69,9 @@ async def view_library(request: Request, username: str = Depends(authenticate_us
     # Manual list of books you've uploaded
     books_metadata = [
         {
-            "title": "Hindi: Rimjhim (Class 4)", 
+            "title": "English (Class 4)", 
             "path": "Class 4/desa105.pdf",
-            "subject": "Hindi"
+            "subject": "English"
         }
     ]
     
