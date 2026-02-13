@@ -7,16 +7,15 @@ from fastapi import FastAPI, Request, Depends, HTTPException, status, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from supabase import create_client, Client
 from fastapi.staticfiles import StaticFiles
+from supabase import create_client, Client
 
-
-
-# --- 1. SETUP & CONFIG ---
+# --- SETUP & CONFIG ---
 app = FastAPI()
-# Add this line right after app = FastAPI()
-app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
+
+# Mount static folder for home page images
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 DB_URL = os.environ.get("DATABASE_URL")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
@@ -47,9 +46,8 @@ def init_db():
 
 init_db()
 
-# --- 2. AUTHENTICATION ---
+# --- AUTHENTICATION ---
 def authenticate_user(credentials: HTTPBasicCredentials = Depends(security)):
-    print(f"DEBUG: Authenticating user '{credentials.username}'")
     if ADMIN_USER and ADMIN_PASS:
         if secrets.compare_digest(credentials.username, ADMIN_USER) and \
            secrets.compare_digest(credentials.password, ADMIN_PASS):
@@ -62,10 +60,9 @@ def authenticate_user(credentials: HTTPBasicCredentials = Depends(security)):
     conn.close()
     if result and secrets.compare_digest(credentials.password, result[0]):
         return credentials.username
-    print(f"DEBUG: Auth Failed for '{credentials.username}'")
     raise HTTPException(status_code=401, detail="Unauthorized", headers={"WWW-Authenticate": "Basic"})
 
-# --- 3. ROUTES ---
+# --- PUBLIC ROUTES ---
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
@@ -90,11 +87,12 @@ async def submit_signup(username: str = Form(...), email: str = Form(...), passw
         return RedirectResponse(url="/view-gallery", status_code=303)
     except:
         conn.rollback()
-        return HTMLResponse("Username already exists or Error occurred.", status_code=400)
+        return HTMLResponse("Username already exists.", status_code=400)
     finally:
         cur.close()
         conn.close()
 
+# --- ADMIN DASHBOARD ---
 @app.get("/admin/dashboard", response_class=HTMLResponse)
 async def admin_dashboard(request: Request, current_user: str = Depends(authenticate_user)):
     if current_user != ADMIN_USER: raise HTTPException(status_code=403)
@@ -117,6 +115,7 @@ async def generate_token(current_user: str = Depends(authenticate_user)):
     conn.close()
     return RedirectResponse(url="/admin/dashboard", status_code=303)
 
+# --- GALLERY & MEDIA ---
 @app.get("/view-gallery", response_class=HTMLResponse)
 async def view_gallery(request: Request, username: str = Depends(authenticate_user)):
     conn = get_db_connection()
@@ -135,98 +134,45 @@ async def view_gallery(request: Request, username: str = Depends(authenticate_us
 
 @app.post("/upload-image")
 async def upload_image(file: UploadFile = File(...), username: str = Depends(authenticate_user)):
-    print(f"DEBUG: {username} is starting upload of {file.filename}")
     try:
         content = await file.read()
-        if not content:
-            return HTMLResponse("Error: File content is empty.")
-
-        # Folder path using lowercase username
-        safe_user = username.lower().strip()
-        path = f"{safe_user}/{file.filename}"
-        
-        print(f"DEBUG: Sending to Supabase path: {path}")
-
-        # Upload to Supabase
-        supabase.storage.from_("new gallery").upload(
-            path=path, 
-            file=content, 
-            file_options={"content-type": file.content_type, "upsert": "true"}
-        )
-        
-        # Database Sync
+        path = f"{username.lower().strip()}/{file.filename}"
+        supabase.storage.from_("new gallery").upload(path=path, file=content, file_options={"content-type": file.content_type, "upsert": "true"})
         conn = get_db_connection()
         cur = conn.cursor()
         url = f"{SUPABASE_URL}/storage/v1/object/public/new%20gallery/{path}"
-        cur.execute(
-            "INSERT INTO image_metadata (file_name, storage_path, public_url, uploaded_by) VALUES (%s, %s, %s, %s)", 
-            (file.filename, path, url, username)
-        )
+        cur.execute("INSERT INTO image_metadata (file_name, storage_path, public_url, uploaded_by) VALUES (%s, %s, %s, %s)", (file.filename, path, url, username))
         conn.commit()
         cur.close()
         conn.close()
-        
-        print(f"DEBUG: Upload SUCCESS for {username}")
         return RedirectResponse(url="/view-gallery", status_code=303)
-
     except Exception as e:
-        print(f"CRITICAL ERROR: {str(e)}")
-        # Returns the error directly to the browser for debugging
-        return HTMLResponse(f"""
-            <div style="color:red; font-family:sans-serif; padding:20px; border:2px solid red;">
-                <h2>Upload Process Failed</h2>
-                <p><strong>Error Message:</strong> {str(e)}</p>
-                <p>Possible causes: Supabase bucket name mismatch or RLS policy block.</p>
-                <a href="/view-gallery">Try to go back to Gallery</a>
-            </div>
-        """)
-
-@app.get("/logout")
-async def logout():
-    return HTMLResponse("<script>alert('Logged out'); window.location.href='/';</script>", status_code=401)
-
-# --- 6. ADDITIONAL MEDIA ACTIONS ---
+        return HTMLResponse(f"Error: {e}")
 
 @app.get("/download-image")
 async def download_image(storage_path: str, username: str = Depends(authenticate_user)):
-    """Fetches the file from Supabase and streams it to the user's browser."""
     try:
-        # 1. Download the raw bytes from Supabase
         file_data = supabase.storage.from_("new gallery").download(storage_path)
-        
-        # 2. Extract the original filename from the path
         filename = storage_path.split("/")[-1]
-        
-        # 3. Stream it back so the browser treats it as a download
-        return StreamingResponse(
-            io.BytesIO(file_data),
-            media_type="application/octet-stream",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
-        )
-    except Exception as e:
-        print(f"DOWNLOAD ERROR: {e}")
-        raise HTTPException(status_code=500, detail="Could not download file.")
+        return StreamingResponse(io.BytesIO(file_data), media_type="application/octet-stream", headers={"Content-Disposition": f"attachment; filename={filename}"})
+    except: raise HTTPException(status_code=500)
 
 @app.post("/delete-image")
 async def delete_image(file_path: str = Form(...), username: str = Depends(authenticate_user)):
-    """Removes the image from both Supabase Storage and PostgreSQL Metadata."""
     try:
-        # 1. Remove from Supabase Storage
         supabase.storage.from_("new gallery").remove([file_path])
-        
-        # 2. Remove from Database
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("DELETE FROM image_metadata WHERE storage_path = %s", (file_path,))
         conn.commit()
         cur.close()
         conn.close()
-        
-        print(f"DEBUG: {username} deleted {file_path}")
         return RedirectResponse(url="/view-gallery", status_code=303)
-    except Exception as e:
-        print(f"DELETE ERROR: {e}")
-        raise HTTPException(status_code=500, detail="Could not delete file.")
+    except: raise HTTPException(status_code=500)
+
+@app.get("/logout")
+async def logout():
+    return HTMLResponse("<script>alert('Logged out'); window.location.href='/';</script>", status_code=401)
 
 if __name__ == "__main__":
     import uvicorn
