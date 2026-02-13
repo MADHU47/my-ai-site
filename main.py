@@ -8,9 +8,14 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from supabase import create_client, Client
+from fastapi.staticfiles import StaticFiles
+
+
 
 # --- 1. SETUP & CONFIG ---
 app = FastAPI()
+# Add this line right after app = FastAPI()
+app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 DB_URL = os.environ.get("DATABASE_URL")
@@ -222,7 +227,7 @@ async def delete_image(file_path: str = Form(...), username: str = Depends(authe
     except Exception as e:
         print(f"DELETE ERROR: {e}")
         raise HTTPException(status_code=500, detail="Could not delete file.")
-        
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
