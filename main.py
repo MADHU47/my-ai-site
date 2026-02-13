@@ -9,178 +9,113 @@ from fastapi.templating import Jinja2Templates
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from supabase import create_client, Client
 
-# 1. SETUP & CONFIG
+# --- 1. SETUP & CONFIG ---
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
-# Environment Variables
 DB_URL = os.environ.get("DATABASE_URL")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 ADMIN_USER = os.environ.get("ADMIN_USERNAME")
 ADMIN_PASS = os.environ.get("ADMIN_PASSWORD")
 
-# Initialize Supabase Client
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 security = HTTPBasic()
 
-# --- 2. DATABASE FUNCTIONS ---
 def get_db_connection():
-    if not DB_URL:
-        raise HTTPException(status_code=500, detail="Database URL not configured")
     return psycopg2.connect(DB_URL, sslmode='require')
 
 def init_db():
     conn = get_db_connection()
     cur = conn.cursor()
     # Users Table
-    cur.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id SERIAL PRIMARY KEY,
-            username TEXT UNIQUE NOT NULL,
-            email TEXT NOT NULL,
-            password TEXT NOT NULL,
-            status TEXT DEFAULT 'pending'
-        )
-    ''')
-    # Image Metadata Table
-    cur.execute('''
-        CREATE TABLE IF NOT EXISTS image_metadata (
-            id SERIAL PRIMARY KEY,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            file_name TEXT NOT NULL,
-            storage_path TEXT NOT NULL,
-            public_url TEXT NOT NULL,
-            uploaded_by TEXT NOT NULL
-        )
-    ''')
-    # NEW: Invite Tokens Table
-    cur.execute('''
-        CREATE TABLE IF NOT EXISTS invite_tokens (
-            id SERIAL PRIMARY KEY,
-            token TEXT UNIQUE NOT NULL,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-        )
-    ''')
+    cur.execute('''CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL, email TEXT NOT NULL, 
+        password TEXT NOT NULL, status TEXT DEFAULT 'pending')''')
+    # Metadata Table
+    cur.execute('''CREATE TABLE IF NOT EXISTS image_metadata (
+        id SERIAL PRIMARY KEY, created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        file_name TEXT NOT NULL, storage_path TEXT NOT NULL, public_url TEXT NOT NULL, uploaded_by TEXT NOT NULL)''')
+    # Invite Tokens Table
+    cur.execute('''CREATE TABLE IF NOT EXISTS invite_tokens (
+        id SERIAL PRIMARY KEY, token TEXT UNIQUE NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW())''')
     conn.commit()
     cur.close()
     conn.close()
 
 init_db()
 
-# --- 3. AUTHENTICATION GATEKEEPER ---
+# --- 2. AUTHENTICATION ---
 def authenticate_user(credentials: HTTPBasicCredentials = Depends(security)):
-    # A. Check Master Admin (from Env Vars)
     if ADMIN_USER and ADMIN_PASS:
         if secrets.compare_digest(credentials.username, ADMIN_USER) and \
            secrets.compare_digest(credentials.password, ADMIN_PASS):
             return credentials.username
-
-    # B. Check Approved Users in Database
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("SELECT password FROM users WHERE username = %s AND status = 'active'", (credentials.username,))
     result = cur.fetchone()
     cur.close()
     conn.close()
-
     if result and secrets.compare_digest(credentials.password, result[0]):
         return credentials.username
-    
-    # C. Deny if neither admin nor active
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED, 
-        detail="Unauthorized or Pending Approval", 
-        headers={"WWW-Authenticate": "Basic"}
-    )
+    raise HTTPException(status_code=401, detail="Unauthorized", headers={"WWW-Authenticate": "Basic"})
 
-# --- 4. PUBLIC & SIGNUP ROUTES ---
-
+# --- 3. PUBLIC & SIGNUP ROUTES ---
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 @app.get("/signup", response_class=HTMLResponse)
 async def signup_page(request: Request, token: str = ""):
-    # Captures 'token' from URL for auto-filling the form
     return templates.TemplateResponse("signup.html", {"request": request, "token": token})
 
 @app.post("/submit-signup")
-async def submit_signup(
-    username: str = Form(...), 
-    email: str = Form(...), 
-    password: str = Form(...),
-    invite_token: str = Form(...)
-):
+async def submit_signup(username: str = Form(...), email: str = Form(...), password: str = Form(...), invite_token: str = Form(...)):
     conn = get_db_connection()
     cur = conn.cursor()
-    
-    # 1. Verify the Invite Token exists
     cur.execute("SELECT id FROM invite_tokens WHERE token = %s", (invite_token,))
-    token_record = cur.fetchone()
-    
-    if not token_record:
+    if not cur.fetchone():
         cur.close()
         conn.close()
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid or expired invite token.")
-
+        raise HTTPException(status_code=403, detail="Invalid Token")
     try:
-        # 2. Insert user with 'active' status immediately
-        cur.execute(
-            "INSERT INTO users (username, email, password, status) VALUES (%s, %s, %s, 'active')",
-            (username, email, password)
-        )
-        # 3. Delete the token so it can't be used again
-        cur.execute("DELETE FROM invite_tokens WHERE id = %s", (token_record[0],))
+        cur.execute("INSERT INTO users (username, email, password, status) VALUES (%s, %s, %s, 'active')", (username, email, password))
+        cur.execute("DELETE FROM invite_tokens WHERE token = %s", (invite_token,))
         conn.commit()
-        return HTMLResponse("<h2>Signup Successful!</h2><p>Your account is now active. You may now enter the gallery.</p><a href='/view-gallery'>Go to Gallery</a>")
-    except Exception:
+        return RedirectResponse(url="/view-gallery", status_code=303)
+    except:
         conn.rollback()
-        raise HTTPException(status_code=400, detail="Username already exists.")
+        raise HTTPException(status_code=400, detail="User already exists")
     finally:
         cur.close()
         conn.close()
 
-# --- 5. ADMIN DASHBOARD ---
-
+# --- 4. ADMIN ROUTES ---
 @app.get("/admin/dashboard", response_class=HTMLResponse)
 async def admin_dashboard(request: Request, current_user: str = Depends(authenticate_user)):
-    if current_user != ADMIN_USER:
-        raise HTTPException(status_code=403, detail="Admins only.")
-    
+    if current_user != ADMIN_USER: raise HTTPException(status_code=403)
     conn = get_db_connection()
     cur = conn.cursor()
-    # Fetch all unused tokens
     cur.execute("SELECT token, created_at FROM invite_tokens ORDER BY created_at DESC")
     tokens = cur.fetchall()
     cur.close()
     conn.close()
-    
-    # Pass base_url to template to generate Magic Links
-    return templates.TemplateResponse("admin.html", {
-        "request": request, 
-        "tokens": tokens, 
-        "base_url": str(request.base_url)
-    })
+    return templates.TemplateResponse("admin.html", {"request": request, "tokens": tokens, "base_url": str(request.base_url)})
 
 @app.post("/admin/generate-token")
 async def generate_token(current_user: str = Depends(authenticate_user)):
-    if current_user != ADMIN_USER:
-        raise HTTPException(status_code=403, detail="Forbidden")
-    
-    # Generate a random 8-character alphanumeric token
-    new_token = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
-    
+    if current_user != ADMIN_USER: raise HTTPException(status_code=403)
+    new_t = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("INSERT INTO invite_tokens (token) VALUES (%s)", (new_token,))
+    cur.execute("INSERT INTO invite_tokens (token) VALUES (%s)", (new_t,))
     conn.commit()
     cur.close()
     conn.close()
     return RedirectResponse(url="/admin/dashboard", status_code=303)
 
-# --- 6. GALLERY & MEDIA ROUTES ---
-
+# --- 5. GALLERY ROUTES ---
 @app.get("/view-gallery", response_class=HTMLResponse)
 async def view_gallery(request: Request, username: str = Depends(authenticate_user)):
     conn = get_db_connection()
@@ -189,79 +124,38 @@ async def view_gallery(request: Request, username: str = Depends(authenticate_us
     images = cur.fetchall()
     cur.close()
     conn.close()
-    
     image_list = []
     for row in images:
         try:
-            response = supabase.storage.from_("new gallery").create_signed_url(row[1], 900)
-            image_list.append({
-                "file_name": row[0],
-                "signed_url": response['signedURL'],
-                "uploaded_by": row[2],
-                "storage_path": row[1]
-            })
-        except Exception:
+            res = supabase.storage.from_("new gallery").create_signed_url(row[1], 900)
+            image_list.append({"file_name": row[0], "signed_url": res['signedURL'], "uploaded_by": row[2], "storage_path": row[1]})
+        except:
             continue
-            
     return templates.TemplateResponse("gallery.html", {"request": request, "images": image_list, "current_user": username})
-
-@app.get("/download-image")
-async def download_image(storage_path: str, username: str = Depends(authenticate_user)):
-    try:
-        file_data = supabase.storage.from_("new gallery").download(storage_path)
-        filename = storage_path.split("/")[-1]
-        return StreamingResponse(
-            io.BytesIO(file_data),
-            media_type="application/octet-stream",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/upload-image")
 async def upload_image(file: UploadFile = File(...), username: str = Depends(authenticate_user)):
     try:
-        file_content = await file.read()
-        file_path = f"{username}/{file.filename}"
-        supabase.storage.from_("new gallery").upload(
-            path=file_path, file=file_content, 
-            file_options={"content-type": file.content_type, "upsert": "true"}
-        )
-        
+        content = await file.read()
+        path = f"{username.lower()}/{file.filename}"
+        supabase.storage.from_("new gallery").upload(path=path, file=content, file_options={"content-type": file.content_type, "upsert": "true"})
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("SELECT id FROM image_metadata WHERE storage_path = %s", (file_path,))
-        if not cur.fetchone():
-            placeholder_url = f"{SUPABASE_URL}/storage/v1/object/public/new%20gallery/{file_path}"
-            cur.execute(
-                "INSERT INTO image_metadata (file_name, storage_path, public_url, uploaded_by) VALUES (%s, %s, %s, %s)",
-                (file.filename, file_path, placeholder_url, username)
-            )
+        url = f"{SUPABASE_URL}/storage/v1/object/public/new%20gallery/{path}"
+        cur.execute("INSERT INTO image_metadata (file_name, storage_path, public_url, uploaded_by) VALUES (%s, %s, %s, %s)", (file.filename, path, url, username))
         conn.commit()
         cur.close()
         conn.close()
         return RedirectResponse(url="/view-gallery", status_code=303)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/delete-image")
-async def delete_image(file_path: str = Form(...), username: str = Depends(authenticate_user)):
-    try:
-        supabase.storage.from_("new gallery").remove([file_path])
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("DELETE FROM image_metadata WHERE storage_path = %s", (file_path,))
-        conn.commit()
-        cur.close()
-        conn.close()
-        return RedirectResponse(url="/view-gallery", status_code=303)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"UPLOAD ERROR: {e}")
+        return HTMLResponse(f"Error: {e}")
 
 @app.get("/logout")
 async def logout():
-    return HTMLResponse(content="<script>alert('Logged out.'); window.location.href='/';</script>", status_code=401)
+    return HTMLResponse("<script>alert('Logged out'); window.location.href='/';</script>", status_code=401)
 
+# --- 6. RUNNER ---
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
