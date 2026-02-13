@@ -2,92 +2,61 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Private Gallery</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
-    <style>
-        body { background-color: #f8f9fa; }
-        .gallery-card { transition: all 0.3s ease; border: none; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        .image-wrapper { background: #eee; overflow: hidden; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-        .gallery-img { transition: all 0.3s ease; width: 100%; }
-        .img-collapsed { height: 250px; object-fit: cover; }
-        .img-expanded { height: auto; max-height: 80vh; object-fit: contain; }
-        .card-expanded { z-index: 100; transform: scale(1.02); box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
-    </style>
 </head>
-<body>
-
-<nav class="navbar navbar-dark bg-dark mb-4">
-    <div class="container">
-        <span class="navbar-brand mb-0 h1">Private Media Gallery</span>
-        <div class="d-flex align-items-center">
-            <span class="text-light me-3 small">User: <strong>{{ current_user }}</strong></span>
-            <a href="/logout" class="btn btn-outline-danger btn-sm">Logout</a>
+<body class="bg-light">
+    <nav class="navbar navbar-dark bg-dark p-3 shadow-sm">
+        <div class="container">
+            <span class="navbar-brand">User Account: <strong>{{ current_user }}</strong></span>
+            <a href="/logout" class="btn btn-outline-danger">Logout</a>
         </div>
-    </div>
-</nav>
+    </nav>
 
-<div class="container">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2>Gallery View</h2>
-        <a href="/" class="btn btn-primary"><i class="bi bi-plus-lg"></i> Upload</a>
-    </div>
-
-    <div class="row row-cols-1 row-cols-md-3 g-4">
-        {% for image in images %}
-        <div class="col">
-            <div class="card h-100 gallery-card" id="card-{{ loop.index }}">
-                <div class="card-header bg-white d-flex justify-content-between align-items-center">
-                    <span class="text-truncate small">{{ image.file_name }}</span>
-                    <button class="btn btn-link btn-sm p-0 text-decoration-none" onclick="toggleExpand('{{ loop.index }}')">
-                        <i class="bi bi-arrows-angle-expand fs-5" id="icon-{{ loop.index }}"></i>
-                    </button>
+    <div class="container mt-5">
+        <div class="card p-4 shadow-sm border-0">
+            <h4 class="fw-bold text-secondary mb-3">Add to Gallery</h4>
+            
+            <form id="debugUploadForm" action="/upload-image" method="post" enctype="multipart/form-data">
+                <div class="mb-3">
+                    <label class="form-label small">Select Image File:</label>
+                    <input type="file" name="file" id="fileInput" class="form-control" required>
                 </div>
+                <button type="submit" class="btn btn-primary w-100 fw-bold">Execute Upload</button>
+            </form>
+        </div>
 
-                <div class="image-wrapper" onclick="toggleExpand('{{ loop.index }}')">
-                    <img src="{{ image.signed_url }}" id="img-{{ loop.index }}" class="gallery-img img-collapsed">
+        <div class="row mt-5">
+            {% if not images %}
+                <div class="text-center text-muted py-5">
+                    <i class="bi bi-inbox fs-1"></i>
+                    <p>No images found in the vault.</p>
                 </div>
+            {% endif %}
 
-                <div class="card-footer bg-white">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <small class="text-muted">By: {{ image.uploaded_by }}</small>
-                        <div class="btn-group">
-                            <a href="/download-image?storage_path={{ image.storage_path }}" class="btn btn-sm btn-outline-success border-0">
-                                <i class="bi bi-download"></i>
-                            </a>
-                            <form action="/delete-image" method="post" onsubmit="return confirm('Delete image?')">
-                                <input type="hidden" name="file_path" value="{{ image.storage_path }}">
-                                <button type="submit" class="btn btn-sm btn-outline-danger border-0">
-                                    <i class="bi bi-trash"></i>
-                                </button>
-                            </form>
-                        </div>
-                    </div>
+            {% for img in images %}
+            <div class="col-md-3 mb-4">
+                <div class="card h-100 shadow-sm border-0">
+                    <img src="{{ img.signed_url }}" class="card-img-top" style="height:200px; object-fit:cover; border-radius: 8px 8px 0 0;">
+                    <div class="p-2 text-center small text-muted text-truncate">{{ img.file_name }}</div>
                 </div>
             </div>
+            {% endfor %}
         </div>
-        {% endfor %}
     </div>
-</div>
 
-<script>
-    function toggleExpand(index) {
-        const img = document.getElementById(`img-${index}`);
-        const icon = document.getElementById(`icon-${index}`);
-        const card = document.getElementById(`card-${index}`);
-
-        if (img.classList.contains('img-collapsed')) {
-            img.classList.replace('img-collapsed', 'img-expanded');
-            icon.classList.replace('bi-arrows-angle-expand', 'bi-arrows-angle-contract');
-            card.classList.add('card-expanded');
-        } else {
-            img.classList.replace('img-expanded', 'img-collapsed');
-            icon.classList.replace('bi-arrows-angle-contract', 'bi-arrows-angle-expand');
-            card.classList.remove('card-expanded');
-            card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        }
-    }
-</script>
+    <script>
+        // Debugging Alert System
+        document.getElementById('debugUploadForm').onsubmit = function() {
+            const fileCheck = document.getElementById('fileInput').files[0];
+            if (!fileCheck) {
+                alert("CLIENT ERROR: No file selected!");
+                return false;
+            }
+            console.log("CLIENT DEBUG: Attempting to send " + fileCheck.name);
+            return true;
+        };
+    </script>
 </body>
 </html>

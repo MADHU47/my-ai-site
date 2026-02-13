@@ -28,15 +28,12 @@ def get_db_connection():
 def init_db():
     conn = get_db_connection()
     cur = conn.cursor()
-    # Users Table
     cur.execute('''CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL, email TEXT NOT NULL, 
         password TEXT NOT NULL, status TEXT DEFAULT 'pending')''')
-    # Metadata Table
     cur.execute('''CREATE TABLE IF NOT EXISTS image_metadata (
         id SERIAL PRIMARY KEY, created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         file_name TEXT NOT NULL, storage_path TEXT NOT NULL, public_url TEXT NOT NULL, uploaded_by TEXT NOT NULL)''')
-    # Invite Tokens Table
     cur.execute('''CREATE TABLE IF NOT EXISTS invite_tokens (
         id SERIAL PRIMARY KEY, token TEXT UNIQUE NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW())''')
     conn.commit()
@@ -47,6 +44,7 @@ init_db()
 
 # --- 2. AUTHENTICATION ---
 def authenticate_user(credentials: HTTPBasicCredentials = Depends(security)):
+    print(f"DEBUG: Authenticating user '{credentials.username}'")
     if ADMIN_USER and ADMIN_PASS:
         if secrets.compare_digest(credentials.username, ADMIN_USER) and \
            secrets.compare_digest(credentials.password, ADMIN_PASS):
@@ -59,9 +57,10 @@ def authenticate_user(credentials: HTTPBasicCredentials = Depends(security)):
     conn.close()
     if result and secrets.compare_digest(credentials.password, result[0]):
         return credentials.username
+    print(f"DEBUG: Auth Failed for '{credentials.username}'")
     raise HTTPException(status_code=401, detail="Unauthorized", headers={"WWW-Authenticate": "Basic"})
 
-# --- 3. PUBLIC & SIGNUP ROUTES ---
+# --- 3. ROUTES ---
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
@@ -86,12 +85,11 @@ async def submit_signup(username: str = Form(...), email: str = Form(...), passw
         return RedirectResponse(url="/view-gallery", status_code=303)
     except:
         conn.rollback()
-        raise HTTPException(status_code=400, detail="User already exists")
+        return HTMLResponse("Username already exists or Error occurred.", status_code=400)
     finally:
         cur.close()
         conn.close()
 
-# --- 4. ADMIN ROUTES ---
 @app.get("/admin/dashboard", response_class=HTMLResponse)
 async def admin_dashboard(request: Request, current_user: str = Depends(authenticate_user)):
     if current_user != ADMIN_USER: raise HTTPException(status_code=403)
@@ -105,7 +103,6 @@ async def admin_dashboard(request: Request, current_user: str = Depends(authenti
 
 @app.post("/admin/generate-token")
 async def generate_token(current_user: str = Depends(authenticate_user)):
-    if current_user != ADMIN_USER: raise HTTPException(status_code=403)
     new_t = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
     conn = get_db_connection()
     cur = conn.cursor()
@@ -115,7 +112,6 @@ async def generate_token(current_user: str = Depends(authenticate_user)):
     conn.close()
     return RedirectResponse(url="/admin/dashboard", status_code=303)
 
-# --- 5. GALLERY ROUTES ---
 @app.get("/view-gallery", response_class=HTMLResponse)
 async def view_gallery(request: Request, username: str = Depends(authenticate_user)):
     conn = get_db_connection()
@@ -129,33 +125,61 @@ async def view_gallery(request: Request, username: str = Depends(authenticate_us
         try:
             res = supabase.storage.from_("new gallery").create_signed_url(row[1], 900)
             image_list.append({"file_name": row[0], "signed_url": res['signedURL'], "uploaded_by": row[2], "storage_path": row[1]})
-        except:
-            continue
+        except: continue
     return templates.TemplateResponse("gallery.html", {"request": request, "images": image_list, "current_user": username})
 
 @app.post("/upload-image")
 async def upload_image(file: UploadFile = File(...), username: str = Depends(authenticate_user)):
+    print(f"DEBUG: {username} is starting upload of {file.filename}")
     try:
         content = await file.read()
-        path = f"{username.lower()}/{file.filename}"
-        supabase.storage.from_("new gallery").upload(path=path, file=content, file_options={"content-type": file.content_type, "upsert": "true"})
+        if not content:
+            return HTMLResponse("Error: File content is empty.")
+
+        # Folder path using lowercase username
+        safe_user = username.lower().strip()
+        path = f"{safe_user}/{file.filename}"
+        
+        print(f"DEBUG: Sending to Supabase path: {path}")
+
+        # Upload to Supabase
+        supabase.storage.from_("new gallery").upload(
+            path=path, 
+            file=content, 
+            file_options={"content-type": file.content_type, "upsert": "true"}
+        )
+        
+        # Database Sync
         conn = get_db_connection()
         cur = conn.cursor()
         url = f"{SUPABASE_URL}/storage/v1/object/public/new%20gallery/{path}"
-        cur.execute("INSERT INTO image_metadata (file_name, storage_path, public_url, uploaded_by) VALUES (%s, %s, %s, %s)", (file.filename, path, url, username))
+        cur.execute(
+            "INSERT INTO image_metadata (file_name, storage_path, public_url, uploaded_by) VALUES (%s, %s, %s, %s)", 
+            (file.filename, path, url, username)
+        )
         conn.commit()
         cur.close()
         conn.close()
+        
+        print(f"DEBUG: Upload SUCCESS for {username}")
         return RedirectResponse(url="/view-gallery", status_code=303)
+
     except Exception as e:
-        print(f"UPLOAD ERROR: {e}")
-        return HTMLResponse(f"Error: {e}")
+        print(f"CRITICAL ERROR: {str(e)}")
+        # Returns the error directly to the browser for debugging
+        return HTMLResponse(f"""
+            <div style="color:red; font-family:sans-serif; padding:20px; border:2px solid red;">
+                <h2>Upload Process Failed</h2>
+                <p><strong>Error Message:</strong> {str(e)}</p>
+                <p>Possible causes: Supabase bucket name mismatch or RLS policy block.</p>
+                <a href="/view-gallery">Try to go back to Gallery</a>
+            </div>
+        """)
 
 @app.get("/logout")
 async def logout():
     return HTMLResponse("<script>alert('Logged out'); window.location.href='/';</script>", status_code=401)
 
-# --- 6. RUNNER ---
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
